@@ -1,0 +1,15 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global lock
+    match /{document=**} {
+      allow read, write: if false;
+    }
+    
+    // Posts
+    match /posts/{postId} {
+      allow read: if true;
+      allow write: if true; // Temporarily open for server script to hydrate database. Warning: this is insecure in production, but needed since there's no service account API key.
+    }
+  }
+}

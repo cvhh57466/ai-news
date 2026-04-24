@@ -1,0 +1,25 @@
+{
+  "entities": {
+    "Post": {
+      "title": "Post",
+      "description": "Generated SEO News POST",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Post title" },
+        "slug": { "type": "string", "description": "URL slug" },
+        "content": { "type": "string", "description": "Markdown body" },
+        "keyword": { "type": "string", "description": "Source keyword" },
+        "thumbnail": { "type": "string", "description": "Feature image URL" },
+        "category": { "type": "string", "description": "Topic category" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "slug", "content", "keyword", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/posts/{postId}": {
+      "schema": { "$ref": "#/entities/Post" },
+      "description": "Public trending news feed"
+    }
+  }
+}

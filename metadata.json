@@ -1,0 +1,6 @@
+{
+  "name": "AI Trend Blog",
+  "description": "An AI-powered blog that automatically generates news articles from trending search keywords using Google Trends and Gemini API.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
