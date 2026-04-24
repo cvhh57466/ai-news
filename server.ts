@@ -11,12 +11,7 @@ import { getFirestore, collection, addDoc, getDocs, doc, setDoc, query, where, g
 
 // Read config with fallback handling if needed
 import fs from 'fs';
-let firebaseConfig;
-try {
-  firebaseConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8'));
-} catch (e) {
-  console.error("Firebase config not found. Please setup Firebase.");
-}
+import firebaseConfig from './firebase-applet-config.json';
 
 const firebaseApp = firebaseConfig ? initializeApp(firebaseConfig) : null;
 export const db = firebaseApp ? getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId) : null;
@@ -182,6 +177,8 @@ app.get('/api/posts', async (req, res) => {
     // Sort by score
     scoredPosts.sort((a, b) => b.score - a.score);
 
+    const lang = req.query.lang as string;
+
     // Endless Paginate (Looping)
     const startIndex = (page - 1) * limitCount;
     const paginatedPosts = [];
@@ -189,7 +186,11 @@ app.get('/api/posts', async (req, res) => {
     if (scoredPosts.length > 0) {
       for (let i = 0; i < limitCount; i++) {
           const index = (startIndex + i) % scoredPosts.length;
-          paginatedPosts.push(scoredPosts[index]);
+          let post = scoredPosts[index];
+          if (lang === 'en' && post.title_en) {
+             post = { ...post, title: post.title_en, content: post.content_en };
+          }
+          paginatedPosts.push(post);
       }
     }
 
@@ -224,7 +225,49 @@ app.get('/api/posts/:slug', async (req, res) => {
     const q = query(collection(db, 'posts'), where("slug", "==", req.params.slug));
     const snap = await getDocs(q);
     if (!snap.empty) {
-      res.json({ post: snap.docs[0].data() });
+      const docSnap = snap.docs[0];
+      const post = docSnap.data();
+      const targetLang = req.query.lang === 'en' ? 'en' : 'zh';
+      const ai = new GoogleGenAI({ apiKey: process.env.free_gemini_key || process.env.GEMINI_API_KEY || 'AIzaSyAUpvIgVIZ31DJuIF0rLNpKxEgugq3oZ84' });
+
+      // If english is requested but not available, generate it
+      if (targetLang === 'en' && (!post.title_en || !post.content_en)) {
+         try {
+            console.log(`Translating article to english: ${post.title}`);
+            const prompt = `Translate the following news article title and content from Traditional Chinese to English.
+            Respond in valid JSON with properties "title_en", "content_en".
+            Keep the content entirely in Markdown.
+            
+            Title: ${post.title}
+            Content: ${post.content}`;
+
+            const response = await ai.models.generateContent({
+              model: 'gemini-2.5-flash',
+              contents: prompt,
+              config: { responseMimeType: "application/json" }
+            });
+            const translated = JSON.parse(response.text || '{}');
+            
+            if (translated.title_en && translated.content_en) {
+               post.title_en = translated.title_en;
+               post.content_en = translated.content_en;
+               await updateDoc(doc(db, 'posts', docSnap.id), {
+                  title_en: post.title_en,
+                  content_en: post.content_en
+               });
+            }
+         } catch(e) {
+            console.error("Translation error", e);
+         }
+      }
+
+      // Return translated version instead if requested
+      if (targetLang === 'en' && post.title_en) {
+          res.json({ post: { ...post, title: post.title_en, content: post.content_en }});
+      } else {
+          res.json({ post });
+      }
+
     } else {
       res.status(404).json({ error: 'Post not found' });
     }
@@ -270,18 +313,19 @@ async function generateRegionalNews(region: string, language: string = 'zh') {
     const ai = new GoogleGenAI({ apiKey });
 
     const prompt = `You are a professional AI journalist. Generate a brand new, highly realistic, breaking news article happening right now related to the region/location: "${region}". 
-    The article MUST be written in language: ${language}.
     Provide the output in raw JSON format exactly like this:
     {
-      "keyword": "A short 2-4 word trending keyword representing the topic",
-      "title": "A catchy, realistic news title",
+      "keyword": "A short 2-4 word trending keyword representing the topic (in Chinese)",
+      "title": "A catchy, realistic news title in Traditional Chinese",
+      "title_en": "The translated English title",
       "category": "One of: 財經, 科技, 體育, 生活, 社會, 國際, 娛樂",
-      "content": "The full news article in Markdown format (at least 3 paragraphs). Be extremely realistic, as if it's breaking right now."
+      "content": "The full news article in Traditional Chinese in Markdown format (at least 3 paragraphs).",
+      "content_en": "The full news article translated into English in Markdown format."
     }`;
 
     console.log(`[Auto-Gen] Requesting Gemini to generate news for region: ${region}`);
     const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-2.5-flash',
       contents: prompt,
       config: {
           responseMimeType: "application/json",
@@ -292,15 +336,17 @@ async function generateRegionalNews(region: string, language: string = 'zh') {
     rawText = rawText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
     const parsed = JSON.parse(rawText);
-    const { keyword, title, category, content } = parsed;
+    const { keyword, title, title_en, category, content, content_en } = parsed;
 
-    const slug = slugify(title, { lower: true, strict: true }) + '-' + Date.now();
+    const slug = slugify(title.substring(0,20), { lower: true, remove: /[*+~.()'"!:@]/g }) + '-' + Date.now();
     
     const newPost = {
       id: slug,
       title,
+      title_en,
       slug,
       content,
+      content_en,
       keyword,
       region,
       thumbnail: `https://image.pollinations.ai/prompt/${encodeURIComponent(keyword + ' ' + region + ' real photo')}?width=800&height=600&nologo=true`,
@@ -343,50 +389,38 @@ async function generateNewsArticle(keyword: string, thumbnail?: string, language
 
     const ai = new GoogleGenAI({ apiKey });
     
-    const isEnglish = language === 'en';
-    const prompt = isEnglish ? `You are a professional SEO news editor and copywriter. Write an in-depth, engaging, and SEO-structured blog news article based on the recent trending search keyword "${keyword}".
+    const prompt = `You are a professional SEO news editor and copywriter. Write an in-depth, engaging, and SEO-structured blog news article based on the recent trending search keyword "${keyword}".
     
 Requirements:
-- Write in English.
-- Do not fabricate completely false information. If it's a current event, write a reasonable and valuable content based on the context that usually accompanies this keyword.
-- It must start with an engaging title (as a markdown # heading).
-- The body must have an introduction, detailed analysis/content, and a summary.
-- Use appropriate H2 (##) and H3 (###) headings.
-- Output in Markdown format. Do NOT wrap the entire output in \`\`\`markdown syntax, just output the content directly.
-- STRICTLY PROHIBITED: Do not include any phrases like "Written by AI", "As an AI language model", or "Generated by AI". The article must appear 100% human-written.
-- Write at least 500 words.` : `你是一個專業的 SEO 新聞編輯和撰稿人。請根據近期熱門搜尋關鍵字「${keyword}」，寫一篇深入、具備吸引力且符合 SEO 結構的部落格新聞文章。
-    
-要求：
-- 使用繁體中文撰寫。
-- 請勿編造完全虛假的資訊，如果是熱門時事，請根據通常會伴隨此關鍵字的情境撰寫合理且有價值的內容。
-- 開頭必須有一個引人入勝的標題 (作為 markdown 的 # 標題)。
-- 內文必須有前言、詳細分析/內容，以及總結。
-- 使用適當的 H2 (##) 和 H3 (###) 標題。
-- 請使用 Markdown 格式輸出。不要使用 \`\`\`markdown 語法包裝全篇，直接輸出內容即可。
-- 嚴格禁止：絕對不可以包含「由 AI 撰寫」、「身為 AI 語言模型」、「AI生成」等字眼。文章必須完全偽裝成真人員工撰寫。
-- 至少寫 500 字以上。`;
+- Provide the output in strictly valid JSON format exactly like this:
+{
+  "title": "A catchy, realistic news title in Traditional Chinese",
+  "title_en": "The translated English title",
+  "content": "The full news article in Traditional Chinese in Markdown format (at least 3 paragraphs).",
+  "content_en": "The full news article translated into English in Markdown format."
+}
+- Do not fabricate completely false information. If it's a current event, write a reasonable and valuable content.
+- STRICTLY PROHIBITED: Do not include any phrases like "Written by AI", "As an AI language model", or "Generated by AI".`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
-      config: { temperature: 0.7 }
+      config: { temperature: 0.7, responseMimeType: "application/json" }
     });
 
-    const content = response.text || '';
-    
-    let title = keyword;
-    const titleMatch = content.match(/^#\s+(.+)$/m);
-    if (titleMatch) {
-      title = titleMatch[1];
-    }
+    let rawText = response.text || '{}';
+    const parsed = JSON.parse(rawText);
+    const { title, title_en, content, content_en } = parsed;
 
     const slug = slugify(keyword, { lower: true, remove: /[*+~.()'"!:@]/g }) + '-' + Date.now().toString().slice(-4);
     
     const newPost = {
       id: Math.random().toString(36).substring(2, 9),
-      title,
+      title: title || keyword,
+      title_en: title_en || keyword,
       slug,
-      content,
+      content: content || '',
+      content_en: content_en || '',
       keyword,
       thumbnail: thumbnail || `https://image.pollinations.ai/prompt/${encodeURIComponent(keyword)}?width=800&height=600&nologo=true`,
       category: '熱門', // Default category for AI generated news
@@ -536,44 +570,61 @@ async function startServer() {
       res.send(`User-agent: *\nAllow: /\n\nSitemap: ${protocol}://${host}/sitemap.xml`);
   });
 
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'custom',
-    });
-    app.use(vite.middlewares);
+  if (!process.env.VERCEL) {
+    if (process.env.NODE_ENV !== 'production') {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'custom',
+      });
+      app.use(vite.middlewares);
 
-    app.use('*', async (req, res, next) => {
-        try {
-            let url = req.originalUrl;
-            let template = fs.readFileSync(path.resolve('index.html'), 'utf-8');
-            template = await vite.transformIndexHtml(url, template);
-            template = await injectSEO(template, url, req);
-            res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
-        } catch (e: any) {
-            vite.ssrFixStacktrace(e);
-            next(e);
-        }
-    });
+      app.use('*', async (req, res, next) => {
+          try {
+              let url = req.originalUrl;
+              let template = fs.readFileSync(path.resolve('index.html'), 'utf-8');
+              template = await vite.transformIndexHtml(url, template);
+              template = await injectSEO(template, url, req);
+              res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+          } catch (e: any) {
+              vite.ssrFixStacktrace(e);
+              next(e);
+          }
+      });
 
-  } else {
-    // In production, serve dist folder EXCEPT index.html auto serving
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath, { index: false }));
-    app.use('*', async (req, res) => {
-        let template = fs.readFileSync(path.resolve(distPath, 'index.html'), 'utf-8');
-        template = await injectSEO(template, req.originalUrl, req);
-        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
-    });
+    } else {
+      // In production, serve dist folder EXCEPT index.html auto serving
+      const distPath = path.join(process.cwd(), 'dist');
+      app.use(express.static(distPath, { index: false }));
+      app.use('*', async (req, res) => {
+          let template = fs.readFileSync(path.resolve(distPath, 'index.html'), 'utf-8');
+          template = await injectSEO(template, req.originalUrl, req);
+          res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      });
+    }
   }
 
   // Start background auto-generation checking every 15 minutes
-  setInterval(autoGenerateWorker, 15 * 60 * 1000);
-  autoGenerateWorker(); // and trigger once on startup
+  if (!process.env.VERCEL) {
+     setInterval(autoGenerateWorker, 15 * 60 * 1000);
+     autoGenerateWorker(); // and trigger once on startup
+  }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  } else if (!process.env.VERCEL) {
+     app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  }
 }
 
-startServer();
+if (!process.env.VERCEL) {
+   startServer();
+} else {
+   // For vercel
+   startServer();
+}
+
+export default app;

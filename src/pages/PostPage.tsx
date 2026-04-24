@@ -24,7 +24,7 @@ export function PostPage() {
   const { t, language } = useLanguage();
 
   useEffect(() => {
-    fetch(`/api/posts/${slug}`)
+    fetch(`/api/posts/${slug}?lang=${language}`)
       .then(res => {
         if (!res.ok) throw new Error('Not found');
         return res.json();

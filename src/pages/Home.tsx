@@ -46,7 +46,7 @@ export function Home() {
 
       if (pageNum === 1) {
         // Initial load: Fetch what's available
-        const res = await fetch(`/api/posts?page=1&limit=6&category=${category}&interests=${interestsParam}&region=${regionParam}`);
+        const res = await fetch(`/api/posts?page=1&limit=6&category=${category}&interests=${interestsParam}&region=${regionParam}&lang=${language}`);
         const data = await res.json();
         setPosts(data.posts || []);
         setHasMore(true); 
