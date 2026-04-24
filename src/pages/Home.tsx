@@ -44,36 +44,24 @@ export function Home() {
       const interestsParam = encodeURIComponent(JSON.stringify(interests));
       const regionParam = encodeURIComponent(currentRegion);
 
-      if (pageNum === 1) {
-        // Initial load: Fetch what's available
-        const res = await fetch(`/api/posts?page=1&limit=6&category=${category}&interests=${interestsParam}&region=${regionParam}&lang=${language}`);
-        const data = await res.json();
-        setPosts(data.posts || []);
-        setHasMore(true); 
-      } else {
-        // Infinite scroll: Ask AI to GENERATE NEW CONTENT real-time
-        const res = await fetch(`/api/posts/generate-feed?region=${regionParam}&language=${language}`);
-        const data = await res.json();
-        
-        if (data.error) {
-           console.error('API Error:', data.error, data.details);
-           let errorMsg = data.error;
-           if (data.details && typeof data.details === 'string') {
-               if (data.details.includes('API key not valid')) {
-                  errorMsg = 'Please configure a valid Gemini API Key in the AI Studio Settings.';
-               }
-           }
-           setFeedError(errorMsg);
-           setHasMore(false); // Stop fetching if there's an API error
-           return;
-        }
-
-        if (data.posts && data.posts.length > 0) {
-           setFeedError(null);
-           setPosts(prev => [...prev, ...data.posts]);
-        }
-        setHasMore(true);
+      // Fetch from db for all pages
+      const res = await fetch(`/api/posts?page=${pageNum}&limit=6&category=${category}&interests=${interestsParam}&region=${regionParam}&lang=${language}`);
+      const data = await res.json();
+      
+      if (data.error) {
+         console.error('API Error:', data.error, data.details);
+         setFeedError(data.error);
+         setHasMore(false);
+         return;
       }
+
+      if (pageNum === 1) {
+        setPosts(data.posts || []);
+      } else if (data.posts && data.posts.length > 0) {
+        setPosts(prev => [...prev, ...data.posts]);
+      }
+      
+      setHasMore(data.posts && data.posts.length > 0);
     } catch (err) {
       console.error(err);
     } finally {
