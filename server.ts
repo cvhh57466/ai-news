@@ -13,15 +13,23 @@ import { getFirestore, collection, addDoc, getDocs, doc, setDoc, query, where, g
 // Read config with fallback handling if needed
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 
 let firebaseConfig: any = null;
 try {
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const configContent = fs.readFileSync(path.join(__dirname, 'firebase-applet-config.json'), 'utf-8');
-  firebaseConfig = JSON.parse(configContent);
+  const require = createRequire(import.meta.url);
+  firebaseConfig = require('./firebase-applet-config.json');
 } catch (e) {
-  console.warn("Could not load firebase-applet-config.json", e);
+  console.warn("Could not load firebase-applet-config.json from require, trying fs...", e);
+  try {
+     const __dirname = path.dirname(fileURLToPath(import.meta.url));
+     const configContent = fs.readFileSync(path.join(__dirname, 'firebase-applet-config.json'), 'utf-8');
+     firebaseConfig = JSON.parse(configContent);
+  } catch(e2) {
+     console.warn("Could not load firebase-applet-config.json from fs either.", e2);
+  }
 }
+
 
 const firebaseApp = firebaseConfig ? initializeApp(firebaseConfig) : null;
 export const db = firebaseApp ? getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId) : null;
@@ -373,7 +381,24 @@ async function generateRegionalNews(region: string, language: string = 'zh') {
     return { post: newPost };
   } catch (error: any) {
     console.error('Gemini Regional Generation Error:', error);
-    return { error: 'Failed to generate regional news', status: 500, details: error.message };
+    const errorStr = JSON.stringify(error) + (error.message || '');
+    if (errorStr.includes('429') || errorStr.includes('Quota exceeded') || errorStr.includes('quota')) {
+      console.log('Falling back to database post due to quota.');
+      try {
+        if (db) {
+          const fallbackQ = query(collection(db, 'posts'), limit(30));
+          const snap = await getDocs(fallbackQ);
+          if (!snap.empty) {
+             const docs = snap.docs;
+             const randomDoc = docs[Math.floor(Math.random() * docs.length)].data();
+             return { post: randomDoc };
+          }
+        }
+      } catch (dbErr) {
+        console.error("Fallback failed:", dbErr);
+      }
+    }
+    return { error: 'Failed to generate regional news', status: 500, details: error.message || errorStr };
   }
 }
 
