@@ -1,5 +1,10 @@
 {
   "version": 2,
+  "functions": {
+    "server.ts": {
+      "includeFiles": "firebase-applet-config.json"
+    }
+  },
   "builds": [
     {
       "src": "server.ts",

@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
+// Dynamic import of vite in dev mode
+// import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import cors from 'cors';
 import { GoogleGenAI } from '@google/genai';
@@ -11,7 +12,13 @@ import { getFirestore, collection, addDoc, getDocs, doc, setDoc, query, where, g
 
 // Read config with fallback handling if needed
 import fs from 'fs';
-import firebaseConfig from './firebase-applet-config.json';
+let firebaseConfig: any = null;
+try {
+  const configContent = fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf-8');
+  firebaseConfig = JSON.parse(configContent);
+} catch (e) {
+  console.warn("Could not load firebase-applet-config.json");
+}
 
 const firebaseApp = firebaseConfig ? initializeApp(firebaseConfig) : null;
 export const db = firebaseApp ? getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId) : null;
@@ -439,12 +446,30 @@ Requirements:
   } catch (error: any) {
     console.error('Error in generation:', error.message);
     let errorMessage = 'Failed to generate post';
+    let statusCode = 500;
     if (error.message?.includes('API key not valid') || error.message?.includes('API_KEY_INVALID')) {
        errorMessage = 'Invalid GEMINI_API_KEY. Please check your API key in the Settings (Secrets panel).';
+    } else if (error.status === 429 || error.message?.includes('429') || error.message?.includes('Quota exceeded') || error.message?.includes('quota')) {
+       errorMessage = 'Too many requests. AI generation is currently rate-limited, retrieving historical data instead.';
+       console.log('Falling back to database post due to quota.');
+       try {
+          if (db) {
+            const fallbackQ = query(collection(db, 'posts'), limit(30));
+            const snap = await getDocs(fallbackQ);
+            if (!snap.empty) {
+               const docs = snap.docs;
+               const randomDoc = docs[Math.floor(Math.random() * docs.length)].data();
+               return { post: randomDoc };
+            }
+          }
+       } catch (dbErr) {
+          console.error("Fallback failed:", dbErr);
+       }
+       statusCode = 429;
     } else if (error.message) {
        errorMessage = error.message;
     }
-    return { error: errorMessage, details: error.message, status: 500 };
+    return { error: errorMessage, details: error.message, status: statusCode };
   }
 }
 
@@ -573,6 +598,7 @@ async function startServer() {
 
   if (!process.env.VERCEL) {
     if (process.env.NODE_ENV !== 'production') {
+      const { createServer: createViteServer } = await import('vite');
       const vite = await createViteServer({
         server: { middlewareMode: true },
         appType: 'custom',
