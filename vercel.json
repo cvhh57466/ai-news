@@ -1,14 +1,12 @@
 {
   "version": 2,
-  "functions": {
-    "server.ts": {
-      "includeFiles": "firebase-applet-config.json"
-    }
-  },
   "builds": [
     {
       "src": "server.ts",
-      "use": "@vercel/node"
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": "firebase-applet-config.json"
+      }
     },
     {
       "src": "package.json",
