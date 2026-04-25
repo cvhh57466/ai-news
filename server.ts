@@ -231,7 +231,7 @@ app.get('/api/posts/generate-feed', async (req, res) => {
   
   const result = await generateRegionalNews(region, language === 'en' ? 'en' : 'zh');
   if (result.error) {
-    return res.status(result.status || 500).json({ error: result.error, details: result.details });
+    return res.status(result.status || 500).json({ error: result.error, details: (result as any).details });
   }
 
   res.json({ success: true, posts: [result.post] });
@@ -310,7 +310,7 @@ app.post('/api/posts/generate', async (req, res) => {
     return res.status(400).json({ error: 'Keyword is required' });
   }
 
-  const result = await generateNewsArticle(keyword, thumbnail, language);
+  const result: any = await generateNewsArticle(keyword, thumbnail, language);
   if (result.error) {
     return res.status(result.status || 500).json({ error: result.error, details: result.details });
   }
@@ -617,44 +617,47 @@ async function injectSEO(html: string, originalUrl: string, req: express.Request
   return html.replace('</head>', `${metaTags}</head>`);
 }
 
+// Sitemap.xml Generation
+app.get('/sitemap.xml', async (req, res) => {
+  if (!db) return res.status(500).send('Database not initialized');
+  try {
+    const protocol = req.protocol === 'http' ? 'https' : req.protocol;
+    const host = req.get('host');
+    const baseUrl = `${protocol}://${host}`;
+    
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url>\n    <loc>${baseUrl}/</loc>\n    <changefreq>always</changefreq>\n    <priority>1.0</priority>\n  </url>`;
+
+    const q = query(collection(db, 'posts'), limit(1000));
+    const snap = await getDocs(q);
+    
+    snap.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (data.slug) {
+        xml += `\n  <url>\n    <loc>${baseUrl}/post/${data.slug}</loc>\n    <lastmod>${new Date(data.createdAt || Date.now()).toISOString()}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>0.8</priority>\n  </url>`;
+      }
+    });
+
+    xml += `\n</urlset>`;
+    res.header('Content-Type', 'application/xml');
+    res.send(xml);
+  } catch (err) {
+    console.error('Sitemap error:', err);
+    res.status(500).send('Error generating sitemap');
+  }
+});
+
+// robots.txt
+app.get('/robots.txt', (req, res) => {
+  const protocol = req.protocol === 'http' ? 'https' : req.protocol;
+  const host = req.get('host');
+  const baseUrl = `${protocol}://${host}`;
+  const txt = `User-agent: *\nAllow: /\n\nSitemap: ${baseUrl}/sitemap.xml`;
+  res.header('Content-Type', 'text/plain');
+  res.send(txt);
+});
+
 // Setup Vite and Static files
 async function startServer() {
-  // Sitemap.xml Generation
-  app.get('/sitemap.xml', async (req, res) => {
-    if (!db) return res.status(500).send('Database not initialized');
-    try {
-      const protocol = req.protocol === 'http' ? 'https' : req.protocol;
-      const host = req.get('host');
-      const baseUrl = `${protocol}://${host}`;
-      
-      let xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url>\n    <loc>${baseUrl}/</loc>\n    <changefreq>always</changefreq>\n    <priority>1.0</priority>\n  </url>`;
-
-      const q = query(collection(db, 'posts'), limit(1000));
-      const snap = await getDocs(q);
-      
-      snap.forEach((docSnap) => {
-        const data = docSnap.data();
-        if (data.slug) {
-          xml += `\n  <url>\n    <loc>${baseUrl}/post/${data.slug}</loc>\n    <lastmod>${new Date(data.createdAt || Date.now()).toISOString()}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>0.8</priority>\n  </url>`;
-        }
-      });
-
-      xml += `\n</urlset>`;
-      res.header('Content-Type', 'application/xml');
-      res.send(xml);
-    } catch (err) {
-      console.error('Sitemap error:', err);
-      res.status(500).send('Error generating sitemap');
-    }
-  });
-
-  // Robots.txt Generation
-  app.get('/robots.txt', (req, res) => {
-      const protocol = req.protocol === 'http' ? 'https' : req.protocol;
-      const host = req.get('host');
-      res.type('text/plain');
-      res.send(`User-agent: *\nAllow: /\n\nSitemap: ${protocol}://${host}/sitemap.xml`);
-  });
 
   if (!process.env.VERCEL) {
     if (process.env.NODE_ENV !== 'production') {
