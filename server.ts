@@ -12,12 +12,15 @@ import { getFirestore, collection, addDoc, getDocs, doc, setDoc, query, where, g
 
 // Read config with fallback handling if needed
 import fs from 'fs';
+import { fileURLToPath } from 'url';
+
 let firebaseConfig: any = null;
 try {
-  const configContent = fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf-8');
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const configContent = fs.readFileSync(path.join(__dirname, 'firebase-applet-config.json'), 'utf-8');
   firebaseConfig = JSON.parse(configContent);
 } catch (e) {
-  console.warn("Could not load firebase-applet-config.json");
+  console.warn("Could not load firebase-applet-config.json", e);
 }
 
 const firebaseApp = firebaseConfig ? initializeApp(firebaseConfig) : null;
@@ -598,7 +601,8 @@ async function startServer() {
 
   if (!process.env.VERCEL) {
     if (process.env.NODE_ENV !== 'production') {
-      const { createServer: createViteServer } = await import('vite');
+      const viteName = 'vite';
+      const { createServer: createViteServer } = await import(viteName);
       const vite = await createViteServer({
         server: { middlewareMode: true },
         appType: 'custom',

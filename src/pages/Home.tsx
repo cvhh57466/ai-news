@@ -62,8 +62,11 @@ export function Home() {
       }
       
       setHasMore(data.posts && data.posts.length > 0);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error('Fetch error:', err);
+      // If we got a 500 completely dropping the connection or returning HTML (like Vercel crash)
+      setFeedError(err.message || 'Failed to fetch content from the server.');
+      setHasMore(false);
     } finally {
       setLoading(false);
       setIsFetchingMore(false);
