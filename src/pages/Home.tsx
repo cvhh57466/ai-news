@@ -44,8 +44,14 @@ export function Home() {
       const interestsParam = encodeURIComponent(JSON.stringify(interests));
       const regionParam = encodeURIComponent(currentRegion);
 
-      // Fetch from db for all pages
-      const res = await fetch(`/api/posts?page=${pageNum}&limit=6&category=${category}&interests=${interestsParam}&region=${regionParam}&lang=${language}`);
+      let url = '';
+      if (pageNum === 1) {
+        url = `/api/posts?page=1&limit=5&category=${category}&interests=${interestsParam}&region=${regionParam}&lang=${language}`;
+      } else {
+        url = `/api/posts/generate-feed?region=${regionParam}&language=${language}`;
+      }
+
+      const res = await fetch(url);
       const data = await res.json();
       
       if (data.error) {
@@ -55,18 +61,22 @@ export function Home() {
          return;
       }
 
+      const newPosts = data.posts || [];
+
       if (pageNum === 1) {
-        setPosts(data.posts || []);
-      } else if (data.posts && data.posts.length > 0) {
-        setPosts(prev => [...prev, ...data.posts]);
+        setPosts(newPosts);
+      } else if (newPosts.length > 0) {
+        setPosts(prev => [...prev, ...newPosts]);
       }
       
-      setHasMore(data.posts && data.posts.length > 0);
+      // Always true because if generate fails, it will fetch from db
+      // This creates infinite scroll.
+      setHasMore(true);
     } catch (err: any) {
       console.error('Fetch error:', err);
       // If we got a 500 completely dropping the connection or returning HTML (like Vercel crash)
       setFeedError(err.message || 'Failed to fetch content from the server.');
-      setHasMore(false);
+      setHasMore(true); // Let them try to scroll down later
     } finally {
       setLoading(false);
       setIsFetchingMore(false);
