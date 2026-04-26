@@ -673,6 +673,13 @@ app.get('/robots.txt', (req, res) => {
   res.send(txt);
 });
 
+// ads.txt
+app.get('/ads.txt', (req, res) => {
+  const txt = `google.com, pub-9923151438975549, DIRECT, f08c47fec0942fa0`;
+  res.header('Content-Type', 'text/plain');
+  res.send(txt);
+});
+
 // Setup Vite and Static files
 async function startServer() {
 
