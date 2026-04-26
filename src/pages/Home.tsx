@@ -44,12 +44,7 @@ export function Home() {
       const interestsParam = encodeURIComponent(JSON.stringify(interests));
       const regionParam = encodeURIComponent(currentRegion);
 
-      let url = '';
-      if (pageNum === 1) {
-        url = `/api/posts?page=1&limit=5&category=${category}&interests=${interestsParam}&region=${regionParam}&lang=${language}`;
-      } else {
-        url = `/api/posts/generate-feed?region=${regionParam}&language=${language}`;
-      }
+      let url = `/api/posts?page=${pageNum}&limit=5&category=${category}&interests=${interestsParam}&region=${regionParam}&lang=${language}`;
 
       const res = await fetch(url);
       const data = await res.json();

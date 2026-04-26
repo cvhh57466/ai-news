@@ -198,25 +198,42 @@ app.get('/api/posts', async (req, res) => {
 
     const lang = req.query.lang as string;
 
-    // Endless Paginate (Looping)
+    // Paginate from DB
     const startIndex = (page - 1) * limitCount;
     const paginatedPosts = [];
     
-    if (scoredPosts.length > 0) {
+    if (startIndex < scoredPosts.length) {
       for (let i = 0; i < limitCount; i++) {
-          const index = (startIndex + i) % scoredPosts.length;
-          let post = scoredPosts[index];
-          if (lang === 'en' && post.title_en) {
-             post = { ...post, title: post.title_en, content: post.content_en };
+          const index = startIndex + i;
+          if (index < scoredPosts.length) {
+             let post = scoredPosts[index];
+             if (lang === 'en' && post.title_en) {
+                post = { ...post, title: post.title_en, content: post.content_en };
+             }
+             paginatedPosts.push(post);
           }
-          paginatedPosts.push(post);
+      }
+    }
+
+    // Accumulation and sharing mechanism:
+    // If we exceed DB records, we generate a new one, save to DB, and return it.
+    if (paginatedPosts.length === 0) {
+      console.log(`[Flow] DB exhausted at page ${page}, generating a new one on-the-fly to extend DB!`);
+      const region = decodedRegion || '全球 (Global)';
+      const result = await generateRegionalNews(region, lang === 'en' ? 'en' : 'zh');
+      if (!result.error && result.post) {
+         let post = result.post;
+         if (lang === 'en' && post.title_en) {
+            post = { ...post, title: post.title_en, content: post.content_en };
+         }
+         paginatedPosts.push(post);
       }
     }
 
     res.json({ 
       posts: paginatedPosts,
       hasMore: true, // Always true for endless scrolling!
-      total: Infinity
+      total: scoredPosts.length + paginatedPosts.length
     });
   } catch (error) {
     console.error('Error fetching posts:', error);
