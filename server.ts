@@ -583,6 +583,7 @@ async function injectSEO(html: string, originalUrl: string, req: express.Request
   let title = '即時新聞聯播 | 全球爆款文章';
   let description = '即時更新的全球新聞聯播，最新潮流與熱門搜索一網打盡！掌握趨勢，了解未來，只在這裡。';
   let image = 'https://image.pollinations.ai/prompt/breaking%20news%20global%20network?width=1200&height=630&nologo=true';
+  let keywords = '新聞, 最新新聞, 突發新聞, 即時新聞, 熱門新聞, 全球新聞, 今日頭條, 趨勢報導, 國際新聞, 科技新聞, 財經新聞, 娛樂新聞, 體育新聞, 懶人包, PTT熱門, Dcard熱搜, news, breaking news, latest news, trending news, global news, live updates, current events, top stories, world news, tech news, financial news, sports news, business news, AI generated news, AI新聞, 自動化新聞';
   const host = req.get('host');
   let url = `https://${host}${originalUrl}`;
 
@@ -596,22 +597,38 @@ async function injectSEO(html: string, originalUrl: string, req: express.Request
         title = post.title + ' | 即時新聞聯播';
         description = post.content ? post.content.substring(0, 160).replace(/<[^>]*>?/gm, '').replace(/#/g, '').trim() : description;
         image = post.thumbnail || image;
+        
+        // Generate a bunch of related search terms for this specific post
+        const postKeywords = [];
+        if (post.keyword) postKeywords.push(post.keyword, `${post.keyword}新聞`, `${post.keyword}最新`, `${post.keyword}懶人包`, `${post.keyword}PTT`, `${post.keyword}Dcard`);
+        if (post.category) postKeywords.push(post.category, `${post.category}新聞`);
+        if (post.region) postKeywords.push(post.region, `${post.region}新聞`);
+        
+        // Add words from title as keywords
+        if (post.title) {
+           const titleWords = post.title.split(/[\s,，、。:：]+/).filter((w: string) => w.length > 1);
+           postKeywords.push(...titleWords);
+        }
+        
+        // Combine specific keywords with some general ones, prioritizing specific ones
+        keywords = [...new Set([...postKeywords, '即時新聞', '最新新聞', post.keyword])].filter(Boolean).join(', ');
       }
     } catch(e) {}
   }
 
   const metaTags = `
-    <title>\${title}</title>
-    <meta name="description" content="\${description}" />
-    <meta property="og:title" content="\${title}" />
-    <meta property="og:description" content="\${description}" />
-    <meta property="og:image" content="\${image}" />
-    <meta property="og:url" content="\${url}" />
+    <title>${title}</title>
+    <meta name="description" content="${description}" />
+    <meta name="keywords" content="${keywords}" />
+    <meta property="og:title" content="${title}" />
+    <meta property="og:description" content="${description}" />
+    <meta property="og:image" content="${image}" />
+    <meta property="og:url" content="${url}" />
     <meta property="og:type" content="article" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="\${title}" />
-    <meta name="twitter:description" content="\${description}" />
-    <meta name="twitter:image" content="\${image}" />
+    <meta name="twitter:title" content="${title}" />
+    <meta name="twitter:description" content="${description}" />
+    <meta name="twitter:image" content="${image}" />
   `;
 
   return html.replace('</head>', `${metaTags}</head>`);
